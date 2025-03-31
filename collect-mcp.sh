@@ -6,7 +6,7 @@ COLLECTED_MCP_DIR=$(mktemp -d)
 # Function to check if a file exists and copy it
 copy_if_exists() {
     local source_file="$1"
-    local dest_name="${2:-mcp_$(basename $(dirname "$source_file")).json}"
+    local dest_name="$2"
     
     if [ -f "$source_file" ]; then
         echo "Found mcp.json at: $source_file"
@@ -23,11 +23,12 @@ get_workspace_path() {
 # Function to check a workspace for mcp.json files
 check_workspace() {
     local workspace_path="$1"
+    local workspace_name=$(basename "$workspace_path")
     
     # Check for local settings in .cursor directory
     if [ -d "$workspace_path/.cursor" ]; then
         if [ -f "$workspace_path/.cursor/mcp.json" ]; then
-            copy_if_exists "$workspace_path/.cursor/mcp.json"
+            copy_if_exists "$workspace_path/.cursor/mcp.json" "mcp_${workspace_name}.json"
         fi
     fi
 }
@@ -37,7 +38,7 @@ collect_global_settings() {
     local global_settings="$HOME/.cursor/mcp.json"
     if [ -f "$global_settings" ]; then
         echo "Found global settings at: $global_settings"
-        cp "$global_settings" "$COLLECTED_MCP_DIR/global_settings.json"
+        cp "$global_settings" "$COLLECTED_MCP_DIR/mcp_global.json"
     fi
 }
 
@@ -72,9 +73,10 @@ collect_global_settings
 # Collect workspace settings
 collect_workspace_settings
 
-# Create zip archive
+# Create zip archive with flattened structure
 echo "Creating zip archive..."
-zip -r /tmp/collected_mcp.zip "$COLLECTED_MCP_DIR"
+cd "$COLLECTED_MCP_DIR"
+zip -r /tmp/collected_mcp.zip ./*
 
 # Cleanup
 echo "Cleaning up temporary files..."
