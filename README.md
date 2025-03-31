@@ -31,8 +31,5 @@ Each workspace can have its own settings in the `.cursor` directory:
    - Example: `"folder": "file:///Users/username/Projects/my-project"`
 
 ## Notes
-
 - Some workspaces may not have local settings
 - The global settings file may not exist if no global settings have been saved
-- File paths with spaces need to be properly escaped or quoted
-- Make sure you have read permissions for all the directories and files you're trying to access 
