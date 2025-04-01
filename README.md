@@ -7,7 +7,7 @@ This guide explains where to find `mcp.json` files in Cursor workspaces on MacOS
 ### Global Settings
 The global settings file can be found at:
 ```
-~/Library/Application Support/Cursor/User/settings.json
+~/.cursor/mcp.json
 ```
 
 ### Workspace Settings
