@@ -1,35 +1,49 @@
-# Guide: Locating mcp.json Files on MacOS
+# Cursor MCP Collector
 
-This guide explains where to find `mcp.json` files in Cursor workspaces on MacOS.
+A script to automatically collect and process Cursor's `mcp.json` configuration files from all workspaces. The script can either package the files into a zip archive or send them directly to a Splunk HTTP Event Collector (HEC).
 
-## File Locations
+## Features
 
-### Global Settings
-The global settings file can be found at:
+- Automatically discovers all Cursor workspaces
+- Collects both global and workspace-specific `mcp.json` files
+- Two operation modes:
+  - Zip collection: Packages all found files into a zip archive
+  - Splunk integration: Sends files directly to Splunk HEC
+
+## Prerequisites
+
+- Bash shell
+- `curl` (for Splunk integration)
+- `zip` (for zip collection mode)
+
+## Configuration
+
+Edit the following settings at the top of the script:
+
+```bash
+# Splunk settings
+SPLUNK_ENABLED=true  # Set to false to disable Splunk integration
+SPLUNK_URL="https://hec.example.com:8088"
+SPLUNK_TOKEN="your-auth-token"
+SPLUNK_INDEX="your-index"
+SPLUNK_SOURCETYPE="your-sourcetype"
 ```
-~/.cursor/mcp.json
-```
 
-### Workspace Settings
-Each workspace can have its own settings in the `.cursor` directory:
-```
-<WORKSPACE_PATH>/.cursor/mcp.json
-```
+## Operation Modes
 
-## How to Find All Workspaces
+### Zip Collection Mode
+When `SPLUNK_ENABLED=false`:
+- Creates a temporary directory
+- Collects all `mcp.json` files
+- Packages them into `/tmp/collected_mcp.zip`
+- Cleans up temporary files
 
-1. Open Finder
-2. Press `Cmd + Shift + G`
-3. Enter this path:
-   ```
-   ~/Library/Application Support/Cursor/User/workspaceStorage
-   ```
-4. Look for folders containing `workspace.json` files
-5. Open each `workspace.json` file in a text editor
-6. Look for the `"folder"` property to find the actual workspace path
-   - The path may be prefixed with `file://`
-   - Example: `"folder": "file:///Users/username/Projects/my-project"`
+### Splunk Integration Mode
+When `SPLUNK_ENABLED=true`:
+- Discovers all `mcp.json` files
+- Sends each file directly to Splunk HEC
+- Includes workspace information in the event data
+- No temporary files or zip archive created
 
-## Notes
-- Some workspaces may not have local settings
-- The global settings file may not exist if no global settings have been saved
+
+For more details about manual collection, see [manual-collection.md](manual-collection.md).

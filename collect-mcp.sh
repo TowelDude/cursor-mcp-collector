@@ -1,16 +1,51 @@
 #!/bin/bash
 
-# Create a temporary directory for collecting files
-COLLECTED_MCP_DIR=$(mktemp -d)
+# Splunk settings
+SPLUNK_ENABLED=true  # Set to false to disable Splunk integration
+SPLUNK_URL="https://hec.example.com:8088"
+SPLUNK_TOKEN="your-auth-token"
+SPLUNK_INDEX="your-index"
+SPLUNK_SOURCETYPE="your-sourcetype"
 
-# Function to check if a file exists and copy it
-copy_if_exists() {
+# Create a temporary directory only if Splunk is disabled
+if [ "$SPLUNK_ENABLED" = false ]; then
+    COLLECTED_MCP_DIR=$(mktemp -d)
+fi
+
+# Function to send JSON to Splunk
+send_to_splunk() {
+    local json_file="$1"
+    local workspace_name="$2"
+    
+    if [ "$SPLUNK_ENABLED" = true ]; then
+        echo "Sending $json_file to Splunk..."
+        curl -s "$SPLUNK_URL/services/collector/event" \
+            -H "Authorization: Splunk $SPLUNK_TOKEN" \
+            -d "{
+                \"index\": \"$SPLUNK_INDEX\",
+                \"sourcetype\": \"$SPLUNK_SOURCETYPE\",
+                \"event\": {
+                    \"workspace\": \"$workspace_name\",
+                    \"content\": $(cat "$json_file")
+                }
+            }"
+        echo
+    fi
+}
+
+# Function to check if a file exists and process it
+process_file() {
     local source_file="$1"
     local dest_name="$2"
+    local workspace_name="$3"
     
     if [ -f "$source_file" ]; then
         echo "Found mcp.json at: $source_file"
-        cp "$source_file" "$COLLECTED_MCP_DIR/$dest_name"
+        if [ "$SPLUNK_ENABLED" = false ]; then
+            cp "$source_file" "$COLLECTED_MCP_DIR/$dest_name"
+        else
+            send_to_splunk "$source_file" "$workspace_name"
+        fi
     fi
 }
 
@@ -28,7 +63,7 @@ check_workspace() {
     # Check for local settings in .cursor directory
     if [ -d "$workspace_path/.cursor" ]; then
         if [ -f "$workspace_path/.cursor/mcp.json" ]; then
-            copy_if_exists "$workspace_path/.cursor/mcp.json" "mcp_${workspace_name}.json"
+            process_file "$workspace_path/.cursor/mcp.json" "mcp_${workspace_name}.json" "$workspace_name"
         fi
     fi
 }
@@ -38,7 +73,11 @@ collect_global_settings() {
     local global_settings="$HOME/.cursor/mcp.json"
     if [ -f "$global_settings" ]; then
         echo "Found global settings at: $global_settings"
-        cp "$global_settings" "$COLLECTED_MCP_DIR/mcp_global.json"
+        if [ "$SPLUNK_ENABLED" = false ]; then
+            cp "$global_settings" "$COLLECTED_MCP_DIR/mcp_global.json"
+        else
+            send_to_splunk "$global_settings" "global"
+        fi
     fi
 }
 
@@ -73,14 +112,17 @@ collect_global_settings
 # Collect workspace settings
 collect_workspace_settings
 
-# Create zip archive with flattened structure
-echo "Creating zip archive..."
-cd "$COLLECTED_MCP_DIR"
-zip -r /tmp/collected_mcp.zip ./*
-
-# Cleanup
-echo "Cleaning up temporary files..."
-rm -rf "$COLLECTED_MCP_DIR"
-
-echo "Collection complete. Check /tmp/collected_mcp.zip for the files."
+# Create zip archive only if Splunk is disabled
+if [ "$SPLUNK_ENABLED" = false ]; then
+    echo "Creating zip archive..."
+    cd "$COLLECTED_MCP_DIR"
+    zip -r /tmp/collected_mcp.zip ./*
+    echo "Collection complete. Check /tmp/collected_mcp.zip for the files."
+    
+    # Cleanup
+    echo "Cleaning up temporary files..."
+    rm -rf "$COLLECTED_MCP_DIR"
+else
+    echo "Collection complete. Files have been sent to Splunk."
+fi
 
