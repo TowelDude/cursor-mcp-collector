@@ -37,7 +37,7 @@ send_to_splunk() {
     
     if [ "$SPLUNK_ENABLED" = true ]; then
         echo "Sending $json_file to Splunk..."
-        curl -s "$SPLUNK_URL/services/collector/event" \
+        if curl -sS "$SPLUNK_URL/services/collector/event" \
             -H "Authorization: Splunk $SPLUNK_TOKEN" \
             -d "{
                 \"index\": \"$SPLUNK_INDEX\",
@@ -47,9 +47,10 @@ send_to_splunk() {
                     \"workspace\": \"$workspace_name\",
                     \"content\": $(cat "$json_file")
                 }
-            }"
+            }"; then
+            FILES_SENT=$((FILES_SENT + 1))
+        fi
         echo
-        FILES_SENT=$((FILES_SENT + 1))
     fi
 }
 
@@ -112,22 +113,22 @@ collect_workspace_settings() {
     
     echo "Searching for workspaces in Cursor's storage..."
     
-    # Find all workspace.json files and process them
-    find "$workspace_storage" -type f -name "workspace.json" | while read -r workspace_file; do
+    # Process each workspace.json file
+    while IFS= read -r workspace_file; do
         local workspace_path=$(get_workspace_path "$workspace_file")
         
         if [ ! -z "$workspace_path" ]; then
             echo "Found workspace at: $workspace_path"
             check_workspace "$workspace_path"
         fi
-    done
+    done < <(find "$workspace_storage" -type f -name "workspace.json")
 }
 
 # Function to send "no files found" event to Splunk
 send_no_files_event() {
     if [ "$SPLUNK_ENABLED" = true ]; then
         echo "Sending no-files-found event to Splunk..."
-        curl -s "$SPLUNK_URL/services/collector/event" \
+        curl -sS "$SPLUNK_URL/services/collector/event" \
             -H "Authorization: Splunk $SPLUNK_TOKEN" \
             -d "{
                 \"index\": \"$SPLUNK_INDEX\",
@@ -135,9 +136,7 @@ send_no_files_event() {
                 \"event\": {
                     \"host\": \"$HOSTNAME\",
                     \"workspace\": \"global\",
-                    \"status\": \"no_files_found\",
-                    \"message\": \"No mcp.json files were found for user $CURRENT_USER\",
-                    \"content\": null
+                    \"content\": \"{\"error\":\"No mcp.json files were found for user $CURRENT_USER\"}\"
                 }
             }"
         echo
