@@ -1,11 +1,29 @@
 #!/bin/bash
 
+# Get the currently logged-in user
+CURRENT_USER=$(stat -f%Su /dev/console)
+
+# Check if the logged-in user was identified
+if [ -z "$CURRENT_USER" ]; then
+    echo "No user is currently logged in. Exiting."
+    exit 1
+fi
+
+# Define variables
+USER_HOME=$(dscl . -read /Users/"$CURRENT_USER" NFSHomeDirectory | awk '{print $2}')
+
 # Splunk settings
 SPLUNK_ENABLED=true  # Set to false to disable Splunk integration
 SPLUNK_URL="https://hec.example.com:8088"
 SPLUNK_TOKEN="your-auth-token"
 SPLUNK_INDEX="your-index"
 SPLUNK_SOURCETYPE="your-sourcetype"
+
+# Initialize counter for files sent to Splunk
+FILES_SENT=0
+
+# Get hostname
+HOSTNAME=$(hostname)
 
 # Create a temporary directory only if Splunk is disabled
 if [ "$SPLUNK_ENABLED" = false ]; then
@@ -25,11 +43,13 @@ send_to_splunk() {
                 \"index\": \"$SPLUNK_INDEX\",
                 \"sourcetype\": \"$SPLUNK_SOURCETYPE\",
                 \"event\": {
+                    \"host\": \"$HOSTNAME\",
                     \"workspace\": \"$workspace_name\",
                     \"content\": $(cat "$json_file")
                 }
             }"
         echo
+        FILES_SENT=$((FILES_SENT + 1))
     fi
 }
 
@@ -70,7 +90,7 @@ check_workspace() {
 
 # Function to collect global settings
 collect_global_settings() {
-    local global_settings="$HOME/.cursor/mcp.json"
+    local global_settings="$USER_HOME/.cursor/mcp.json"
     if [ -f "$global_settings" ]; then
         echo "Found global settings at: $global_settings"
         if [ "$SPLUNK_ENABLED" = false ]; then
@@ -83,7 +103,7 @@ collect_global_settings() {
 
 # Function to collect workspace settings
 collect_workspace_settings() {
-    local workspace_storage="$HOME/Library/Application Support/Cursor/User/workspaceStorage"
+    local workspace_storage="$USER_HOME/Library/Application Support/Cursor/User/workspaceStorage"
     
     if [ ! -d "$workspace_storage" ]; then
         echo "Cursor workspace storage not found at: $workspace_storage"
@@ -103,8 +123,29 @@ collect_workspace_settings() {
     done
 }
 
+# Function to send "no files found" event to Splunk
+send_no_files_event() {
+    if [ "$SPLUNK_ENABLED" = true ]; then
+        echo "Sending no-files-found event to Splunk..."
+        curl -s "$SPLUNK_URL/services/collector/event" \
+            -H "Authorization: Splunk $SPLUNK_TOKEN" \
+            -d "{
+                \"index\": \"$SPLUNK_INDEX\",
+                \"sourcetype\": \"$SPLUNK_SOURCETYPE\",
+                \"event\": {
+                    \"host\": \"$HOSTNAME\",
+                    \"workspace\": \"global\",
+                    \"status\": \"no_files_found\",
+                    \"message\": \"No mcp.json files were found for user $CURRENT_USER\",
+                    \"content\": null
+                }
+            }"
+        echo
+    fi
+}
+
 # Main execution
-echo "Starting mcp.json collection..."
+echo "Starting mcp.json collection for user: $CURRENT_USER..."
 
 # Collect global settings
 collect_global_settings
@@ -123,6 +164,11 @@ if [ "$SPLUNK_ENABLED" = false ]; then
     echo "Cleaning up temporary files..."
     rm -rf "$COLLECTED_MCP_DIR"
 else
-    echo "Collection complete. Files have been sent to Splunk."
+    if [ $FILES_SENT -gt 0 ]; then
+        echo "Collection complete. $FILES_SENT files have been sent to Splunk."
+    else
+        echo "Collection complete. No mcp.json files were found to send to Splunk."
+        send_no_files_event
+    fi
 fi
 
