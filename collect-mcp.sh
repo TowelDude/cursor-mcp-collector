@@ -80,17 +80,19 @@ get_workspace_path() {
 check_workspace() {
     local workspace_path="$1"
     local workspace_name=$(basename "$workspace_path")
+    local app_name="$2"
     
-    # Check for local settings in .cursor directory
-    if [ -d "$workspace_path/.cursor" ]; then
-        if [ -f "$workspace_path/.cursor/mcp.json" ]; then
-            process_file "$workspace_path/.cursor/mcp.json" "mcp_${workspace_name}.json" "$workspace_name"
+    app_lowercase=$(echo "$app_name" | tr '[:upper:]' '[:lower:]')
+    # Check for local settings in app's directory
+    if [ -d "$workspace_path/.$app_lowercase" ]; then
+        if [ -f "$workspace_path/.$app_lowercase/mcp.json" ]; then
+            process_file "$workspace_path/.$app_lowercase/mcp.json" "mcp_${workspace_name}.json" "$workspace_name"
         fi
     fi
 }
 
 # Function to collect global settings
-collect_global_settings() {
+collect_cursor_global_settings() {
     local global_settings="$USER_HOME/.cursor/mcp.json"
     if [ -f "$global_settings" ]; then
         echo "Found global settings at: $global_settings"
@@ -102,16 +104,30 @@ collect_global_settings() {
     fi
 }
 
+# Function to collect Claude Desktop settings
+collect_claude_desktop_settings() {
+    local claude_desktop_settings="$USER_HOME/Library/Application Support/Claude/claude_desktop_config.json"
+    if [ -f "$claude_desktop_settings" ]; then
+        echo "Found Claude Desktop settings at: $claude_desktop_settings"
+        if [ "$SPLUNK_ENABLED" = false ]; then
+            cp "$claude_desktop_settings" "$COLLECTED_MCP_DIR/claude_desktop_config.json"
+        else
+            send_to_splunk "$claude_desktop_settings" "claude_desktop"
+        fi
+    fi
+}
+
 # Function to collect workspace settings
 collect_workspace_settings() {
-    local workspace_storage="$USER_HOME/Library/Application Support/Cursor/User/workspaceStorage"
+    local app_name=$1
+    local workspace_storage="$USER_HOME/Library/Application Support/$app_name/User/workspaceStorage"
     
     if [ ! -d "$workspace_storage" ]; then
-        echo "Cursor workspace storage not found at: $workspace_storage"
+        echo "$app_name workspace storage not found at: $workspace_storage"
         return 1
     fi
     
-    echo "Searching for workspaces in Cursor's storage..."
+    echo "Searching for workspaces in $app_name's storage..."
     
     # Process each workspace.json file
     while IFS= read -r workspace_file; do
@@ -119,7 +135,7 @@ collect_workspace_settings() {
         
         if [ ! -z "$workspace_path" ]; then
             echo "Found workspace at: $workspace_path"
-            check_workspace "$workspace_path"
+            check_workspace "$workspace_path" "$app_name"
         fi
     done < <(find "$workspace_storage" -type f -name "workspace.json")
 }
@@ -146,11 +162,16 @@ send_no_files_event() {
 # Main execution
 echo "Starting mcp.json collection for user: $CURRENT_USER..."
 
-# Collect global settings
-collect_global_settings
+# Collect cursor's global settings
+collect_cursor_global_settings
 
-# Collect workspace settings
-collect_workspace_settings
+# Collect Claude Desktop global settings
+collect_claude_desktop_settings
+
+# Collect workspace settings from Cursor and VSCode
+collect_workspace_settings "Cursor"
+collect_workspace_settings "Code"
+
 
 # Create zip archive only if Splunk is disabled
 if [ "$SPLUNK_ENABLED" = false ]; then
