@@ -104,6 +104,20 @@ collect_cursor_global_settings() {
     fi
 }
 
+collect_code_global_settings() {
+    local global_settings="$USER_HOME/Library/Application Support/Code/User/settings.json"
+    if [ -f "$global_settings" ]; then
+        if grep -q '"mcp":' "$global_settings"; then
+            echo "Found global settings at: $global_settings"
+            if [ "$SPLUNK_ENABLED" = false ]; then
+                cp "$global_settings" "$COLLECTED_MCP_DIR/mcp_global.json"
+            else
+                send_to_splunk "$global_settings" "vscode_global"
+            fi
+        fi
+    fi
+}
+
 # Function to collect Claude Desktop settings
 collect_claude_desktop_settings() {
     local claude_desktop_settings="$USER_HOME/Library/Application Support/Claude/claude_desktop_config.json"
@@ -167,6 +181,9 @@ collect_cursor_global_settings
 
 # Collect Claude Desktop global settings
 collect_claude_desktop_settings
+
+# Collect global settings from VSCode
+collect_code_global_settings
 
 # Collect workspace settings from Cursor and VSCode
 collect_workspace_settings "Cursor"
