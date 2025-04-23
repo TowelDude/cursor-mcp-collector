@@ -174,7 +174,7 @@ collect_intellij_global_settings() {
 }
 
 collect_intellij_workspace_settings() {
-    local recentProjects=$(find "$USER_HOME/Library/Application Support/JetBrains/IntelliJIdea*/options/recentProjects.xml" -type f | head -n 1)
+    local recentProjects=$(find $USER_HOME/Library/Application\ Support/JetBrains/IntelliJ* -name "recentProjects.xml" -type f | head -n 1)
     local sent_files=0
 
     # Process each recent project
