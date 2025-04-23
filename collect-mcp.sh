@@ -34,23 +34,27 @@ fi
 send_to_splunk() {
     local json_file="$1"
     local workspace_name="$2"
+    local app_type="$3"
     
     if [ "$SPLUNK_ENABLED" = true ]; then
-        echo "Sending $json_file to Splunk..."
         if curl -sS "$SPLUNK_URL/services/collector/event" \
             -H "Authorization: Splunk $SPLUNK_TOKEN" \
             -d "{
                 \"index\": \"$SPLUNK_INDEX\",
                 \"sourcetype\": \"$SPLUNK_SOURCETYPE\",
+                \"source\": \"$json_file\",
                 \"event\": {
                     \"host\": \"$HOSTNAME\",
                     \"workspace\": \"$workspace_name\",
+                    \"app\": \"$app_type\",
                     \"content\": $(cat "$json_file")
                 }
             }"; then
             FILES_SENT=$((FILES_SENT + 1))
+            echo "Successfully sent $app_type settings from $json_file to Splunk"
+        else
+            echo "Failed to send $app_type settings from $json_file to Splunk"
         fi
-        echo
     fi
 }
 
@@ -59,13 +63,14 @@ process_file() {
     local source_file="$1"
     local dest_name="$2"
     local workspace_name="$3"
+    local app_type="$4"
     
     if [ -f "$source_file" ]; then
-        echo "Found mcp.json at: $source_file"
         if [ "$SPLUNK_ENABLED" = false ]; then
             cp "$source_file" "$COLLECTED_MCP_DIR/$dest_name"
+            echo "Collected $app_type settings from $source_file to $COLLECTED_MCP_DIR/$dest_name"
         else
-            send_to_splunk "$source_file" "$workspace_name"
+            send_to_splunk "$source_file" "$workspace_name" "$app_type"
         fi
     fi
 }
@@ -86,7 +91,7 @@ check_workspace() {
     # Check for local settings in app's directory
     if [ -d "$workspace_path/.$app_lowercase" ]; then
         if [ -f "$workspace_path/.$app_lowercase/mcp.json" ]; then
-            process_file "$workspace_path/.$app_lowercase/mcp.json" "mcp_${workspace_name}.json" "$workspace_name"
+            process_file "$workspace_path/.$app_lowercase/mcp.json" "mcp_${workspace_name}.json" "$workspace_name" "${app_name}_workspace"
         fi
     fi
 }
@@ -95,12 +100,7 @@ check_workspace() {
 collect_cursor_global_settings() {
     local global_settings="$USER_HOME/.cursor/mcp.json"
     if [ -f "$global_settings" ]; then
-        echo "Found global settings at: $global_settings"
-        if [ "$SPLUNK_ENABLED" = false ]; then
-            cp "$global_settings" "$COLLECTED_MCP_DIR/mcp_global.json"
-        else
-            send_to_splunk "$global_settings" "global"
-        fi
+        process_file "$global_settings" "cursor_mcp_global.json" "global" "Cursor_global"
     fi
 }
 
@@ -108,12 +108,7 @@ collect_code_global_settings() {
     local global_settings="$USER_HOME/Library/Application Support/Code/User/settings.json"
     if [ -f "$global_settings" ]; then
         if grep -q '"mcp":' "$global_settings"; then
-            echo "Found global settings at: $global_settings"
-            if [ "$SPLUNK_ENABLED" = false ]; then
-                cp "$global_settings" "$COLLECTED_MCP_DIR/mcp_global.json"
-            else
-                send_to_splunk "$global_settings" "vscode_global"
-            fi
+            process_file "$global_settings" "code_mcp_global.json" "global" "Code_global"
         fi
     fi
 }
@@ -122,12 +117,7 @@ collect_code_global_settings() {
 collect_claude_desktop_settings() {
     local claude_desktop_settings="$USER_HOME/Library/Application Support/Claude/claude_desktop_config.json"
     if [ -f "$claude_desktop_settings" ]; then
-        echo "Found Claude Desktop settings at: $claude_desktop_settings"
-        if [ "$SPLUNK_ENABLED" = false ]; then
-            cp "$claude_desktop_settings" "$COLLECTED_MCP_DIR/claude_desktop_config.json"
-        else
-            send_to_splunk "$claude_desktop_settings" "claude_desktop"
-        fi
+        process_file "$claude_desktop_settings" "claude_desktop_config.json" "global" "Claude_global"
     fi
 }
 
@@ -148,7 +138,6 @@ collect_workspace_settings() {
         local workspace_path=$(get_workspace_path "$workspace_file")
         
         if [ ! -z "$workspace_path" ]; then
-            echo "Found workspace at: $workspace_path"
             check_workspace "$workspace_path" "$app_name"
         fi
     done < <(find "$workspace_storage" -type f -name "workspace.json")
@@ -157,19 +146,78 @@ collect_workspace_settings() {
 # Function to send "no files found" event to Splunk
 send_no_files_event() {
     if [ "$SPLUNK_ENABLED" = true ]; then
-        echo "Sending no-files-found event to Splunk..."
-        curl -sS "$SPLUNK_URL/services/collector/event" \
+        if curl -sS "$SPLUNK_URL/services/collector/event" \
             -H "Authorization: Splunk $SPLUNK_TOKEN" \
             -d "{
                 \"index\": \"$SPLUNK_INDEX\",
                 \"sourcetype\": \"$SPLUNK_SOURCETYPE\",
+                \"source\": \"mcp_collector\",
                 \"event\": {
                     \"host\": \"$HOSTNAME\",
                     \"workspace\": \"global\",
+                    \"app\": \"all\",
                     \"content\": \"{\"error\":\"No mcp.json files were found for user $CURRENT_USER\"}\"
                 }
-            }"
-        echo
+            }"; then
+            echo "Sent no-files-found notification to Splunk for user $CURRENT_USER"
+        else
+            echo "Failed to send no-files-found notification to Splunk"
+        fi
+    fi
+}
+
+collect_intellij_global_settings() {
+    local global_settings=$(find "$USER_HOME/Library/Application Support/JetBrains" -name "llm.mcpServers.xml" -type f | head -n 1)
+    if [ -f "$global_settings" ]; then
+        process_file "$global_settings" "intellij_mcp_global.xml" "global" "IntelliJ_global"
+    fi
+}
+
+collect_intellij_workspace_settings() {
+    local recentProjects=$(find "$USER_HOME/Library/Application Support/JetBrains/IntelliJIdea*/options/recentProjects.xml" -type f | head -n 1)
+    local sent_files=0
+
+    # Process each recent project
+    while IFS= read -r project_path; do
+        # Extract project name from path
+        local project_name=$(basename "$project_path")
+
+        # only supported variable is $USER_HOME$. replace it with the actual path
+        project_path="${project_path/\$USER_HOME\$/$USER_HOME}"
+
+        if [ -f "$project_path/.idea/workspace.xml" ]; then
+            if grep -q 'McpProject' "$project_path/.idea/workspace.xml"; then
+                process_file "$project_path/.idea/workspace.xml" "intellij_workspace_${project_name}.xml" "$project_name" "IntelliJ_workspace"
+                sent_files=$((sent_files + 1))
+            fi
+        fi
+
+    done < <(grep -o '<entry key="[^"]*"' "$recentProjects" | cut -d'"' -f2)
+
+    # fallback if previous method failed, assume root of all workspaces is at $USER_HOME/IdeaProjects/<project_name>/
+    if [ $sent_files -eq 0 ]; then
+        local project_path="$USER_HOME/IdeaProjects"
+        local workspace_configuration_file=".idea/workspace.xml"
+        
+        if [ -d "$project_path" ]; then
+            for project_name in $(ls "$project_path"); do
+                local project_dir="$project_path/$project_name"
+                local workspace_configuration_path="$project_dir/$workspace_configuration_file"
+                
+                if [ -d "$project_dir" ]; then
+                    if [ -f "$workspace_configuration_path" ]; then
+                        if grep -q 'McpProject' "$workspace_configuration_path"; then
+                            process_file "$workspace_configuration_path" "intellij_workspace_${project_name}.xml" "$project_name" "IntelliJ_workspace"
+                            sent_files=$((sent_files + 1))
+                        fi
+                    fi
+                fi
+            done
+        fi
+    fi
+
+    if [ $sent_files -eq 0 ]; then
+        echo "No IntelliJ workspaces found"
     fi
 }
 
@@ -185,24 +233,33 @@ collect_claude_desktop_settings
 # Collect global settings from VSCode
 collect_code_global_settings
 
+collect_intellij_global_settings
+
+
 # Collect workspace settings from Cursor and VSCode
 collect_workspace_settings "Cursor"
 collect_workspace_settings "Code"
 
+# Collect workspace settings from IntelliJ
+collect_intellij_workspace_settings
 
 # Create zip archive only if Splunk is disabled
 if [ "$SPLUNK_ENABLED" = false ]; then
-    echo "Creating zip archive..."
-    cd "$COLLECTED_MCP_DIR"
-    zip -r /tmp/collected_mcp.zip ./*
-    echo "Collection complete. Check /tmp/collected_mcp.zip for the files."
-    
-    # Cleanup
-    echo "Cleaning up temporary files..."
-    rm -rf "$COLLECTED_MCP_DIR"
+    if [ -d "$COLLECTED_MCP_DIR" ] && [ "$(ls -A "$COLLECTED_MCP_DIR")" ]; then
+        echo "Creating zip archive from collected files..."
+        cd "$COLLECTED_MCP_DIR"
+        zip -r /tmp/collected_mcp.zip ./*
+        echo "Collection complete. Check /tmp/collected_mcp.zip for the files."
+        
+        # Cleanup
+        echo "Cleaning up temporary files..."
+        rm -rf "$COLLECTED_MCP_DIR"
+    else
+        echo "No files were collected to create zip archive."
+    fi
 else
     if [ $FILES_SENT -gt 0 ]; then
-        echo "Collection complete. $FILES_SENT files have been sent to Splunk."
+        echo "Collection complete. Successfully sent $FILES_SENT files to Splunk."
     else
         echo "Collection complete. No mcp.json files were found to send to Splunk."
         send_no_files_event
