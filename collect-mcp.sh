@@ -88,6 +88,12 @@ check_workspace() {
     local app_name="$2"
     
     app_lowercase=$(echo "$app_name" | tr '[:upper:]' '[:lower:]')
+
+    # fix for VSCode
+    if [ "$app_lowercase" = "code" ]; then
+        app_lowercase="vscode"
+    fi
+
     # Check for local settings in app's directory
     if [ -d "$workspace_path/.$app_lowercase" ]; then
         if [ -f "$workspace_path/.$app_lowercase/mcp.json" ]; then
